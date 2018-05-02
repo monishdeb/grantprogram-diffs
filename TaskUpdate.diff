@@ -1,0 +1,120 @@
+diff --git a/Users/monish/src/civicrm44/CRM/Grant/Form/Task/Update.php b/CRM/Grant/Form/Task/Update.php
+index 2b5dd70..cc518e0 100644
+--- a/Users/monish/src/civicrm44/CRM/Grant/Form/Task/Update.php
++++ b/CRM/Grant/Form/Task/Update.php
+@@ -64,17 +64,62 @@ class CRM_Grant_Form_Task_Update extends CRM_Grant_Form_Task {
+    */
+   function buildQuickForm() {
+     $grantStatus = CRM_Core_PseudoConstant::get('CRM_Grant_DAO_Grant', 'status_id');
++    CRM_Utils_System::setTitle(ts('Update Grants'));
+     $this->addElement('select', 'status_id', ts('Grant Status'), array('' => '') + $grantStatus);
++    $this->addElement('radio', 'radio_ts', NULL, ts('&nbsp;Do not update'), 'no_update' );  
++    $this->addElement('radio', 'radio_ts', NULL, ts('&nbsp;Other Amount'), 'amount_granted');  
++    $this->setDefaults(array('radio_ts'=> 'no_update'));
+ 
+     $this->addElement('text', 'amount_granted', ts('Amount Granted'));
+     $this->addRule('amount_granted', ts('Please enter a valid amount.'), 'money');
+ 
+-    $this->addDate('decision_date', ts('Grant Decision'), FALSE, array('formatType' => 'custom'));
++    $this->addElement('radio', 'radio_ts', NULL, ts('&nbsp;Standard Allocation'), 'amount_total');
+ 
+-    $this->assign('elements', array('status_id', 'amount_granted', 'decision_date'));
++    $this->addDate('decision_date', ts('Grant Decision'), FALSE, array('formatType' => 'custom'));
++    $this->addElement('hidden', 'standard_allocation', 'Text', '');
+     $this->assign('totalSelectedGrants', count($this->_grantIds));
+ 
+     $this->addDefaultButtons(ts('Update Grants'), 'done');
++    
++    $this->addFormRule(array('CRM_Grant_Form_Task_Update', 'formRule'), $this);
++  }
++
++  /**
++   * form validations
++   *
++   * @param array $params   posted values of the form
++   * @param array $files    list of errors to be posted back to the form
++   * @param array $self     form object
++   *
++   * @return array list of errors to be posted back to the form
++   * @static
++   * @access public
++   */
++  static function formRule($params, $files, $self) {
++    $errors = $defaults = array();
++    $grantIds = implode(', ', $self->_grantIds);
++    $query = "SELECT id, assessment FROM civicrm_grant WHERE id IN ({$grantIds})";
++    $dao = CRM_Core_DAO::executeQuery($query);
++    while ($dao->fetch()) {
++      $sort[$dao->id] = $dao->assessment; 
++      $programId = CRM_Core_DAO::getFieldValue('CRM_Grant_DAO_Grant', $dao->id, 'grant_program_id');
++      $programParams = array('id' => $programId);
++      $grantProgram = CRM_Grant_BAO_GrantProgram::retrieve($programParams, $defaults);
++      $algoType = CRM_Core_DAO::getFieldValue('CRM_Core_DAO_OptionValue', $grantProgram->allocation_algorithm, 'grouping');
++      if ($algoType == 'batch' && $params['radio_ts'] == 'amount_total') {
++        $errors['standard_allocation'] = 'It is not possible to update the allocation amount for less than a full batch. If you would like to (re-)run the batch allocation algorithm, go to Administer > CiviGrants > Grant Programs, click View beside the Grant Program of interest, then click Allocate Approved (Trial) button.';
++      }
++    }
++    if (!empty($errors)) {
++      return $errors;
++    }
++    arsort($sort);
++    foreach ($sort as $keys => $vals) {
++      if (array_key_exists($keys, array_flip($self->_grantIds))) {
++        $self->sorted[] = $keys;
++      }
++    }
++    return TRUE;
+   }
+ 
+   /**
+@@ -98,20 +143,40 @@ class CRM_Grant_Form_Task_Update extends CRM_Grant_Form_Task {
+ 
+     if (!empty($params)) {
+       foreach ($params as $key => $value) {
+-        $values[$key] = $value;
++        if ( $key != 'radio_ts' ) {
++          $values[$key] = $value;
++        }
+       }
+-      foreach ($this->_grantIds as $grantId) {
+-        $ids['grant'] = $grantId;
+-
+-        CRM_Grant_BAO_Grant::add($values, $ids);
++      
++      foreach ($this->sorted as $grantId) {
++        $ids['grant_id'] = $grantId;
++        $grantParams = array('id' => $grantId);
++        $grant = CRM_Grant_BAO_Grant::retrieve($grantParams, CRM_Core_DAO::$_nullArray);
++        $values['contact_id'] = $grant->contact_id;
++        $values['grant_program_id'] = $grant->grant_program_id;
++        $values['grant_type_id'] = $grant->grant_type_id;
++        $values['id'] = $grantId;
++        $values['status_id'] = $params['status_id'];
++        $values['amount_total'] = $grant->amount_total;
++        if ($params['radio_ts'] == 'amount_total') {
++          unset($params['amount_granted']);
++          unset($values['amount_granted']);
++          $values['assessment'] = $grant->assessment;
++          $values['allocation'] = TRUE;
++          CRM_Grant_BAO_Grant::add($values, $ids);
++        } 
++        else {  
++          if ($params['radio_ts'] == 'no_update') {
++            unset($values['amount_granted']);
++          }
++          CRM_Grant_BAO_Grant::add($values, $ids);
++        }
+         $updatedGrants++;
+       }
+     }
+-
+-    $status = array(
+-      ts('Updated Grant(s): %1', array(1 => $updatedGrants)),
+-      ts('Total Selected Grant(s): %1', array(1 => count($this->_grantIds))),
+-    );
++    $status = 
++      ts('Updated Grant(s): %1', array(1 => $updatedGrants)).', '.
++      ts('Total Selected Grant(s): %1', array(1 => count($this->_grantIds)));
+     CRM_Core_Session::setStatus($status);
+     CRM_Utils_System::redirect(CRM_Utils_System::url('civicrm/grant/search', 'force=1&qfKey=' . $qfKey));
+   }

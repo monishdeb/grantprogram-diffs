@@ -1,0 +1,63 @@
+diff --git a/Users/monish/src/civicrm44/CRM/Financial/BAO/ExportFormat/CSV.php b/CRM/Financial/BAO/ExportFormat/CSV.php
+index 58c711e..8c7cfb2 100644
+--- a/Users/monish/src/civicrm44/CRM/Financial/BAO/ExportFormat/CSV.php
++++ b/CRM/Financial/BAO/ExportFormat/CSV.php
+@@ -82,10 +82,14 @@ class CRM_Financial_BAO_ExportFormat_CSV extends CRM_Financial_BAO_ExportFormat
+       ft.trxn_id AS trxn_id,
+       cov.label AS payment_instrument,
+       ft.check_number,
+-      c.source AS source,
++      CASE 
++        WHEN eftc.entity_table = 'civicrm_contribution'
++        THEN c.source
++        ELSE cgp.label
++      END AS source,
+       ft.currency AS currency,
+       cov_status.label AS status,
+-      CASE
++      CASE 
+         WHEN efti.entity_id IS NOT NULL
+         THEN efti.amount
+         ELSE eftc.amount
+@@ -103,8 +107,11 @@ class CRM_Financial_BAO_ExportFormat_CSV extends CRM_Financial_BAO_ExportFormat
+       LEFT JOIN civicrm_financial_account fa_from ON fa_from.id = ft.from_financial_account_id
+       LEFT JOIN civicrm_option_group cog ON cog.name = 'payment_instrument'
+       LEFT JOIN civicrm_option_value cov ON (cov.value = ft.payment_instrument_id AND cov.option_group_id = cog.id)
+-      LEFT JOIN civicrm_entity_financial_trxn eftc ON (eftc.financial_trxn_id  = ft.id AND eftc.entity_table = 'civicrm_contribution')
+-      LEFT JOIN civicrm_contribution c ON c.id = eftc.entity_id
++      LEFT JOIN civicrm_entity_financial_trxn eftc ON (eftc.financial_trxn_id  = ft.id AND (eftc.entity_table = 'civicrm_contribution' OR  eftc.entity_table = 'civicrm_grant'))
++      LEFT JOIN civicrm_contribution c ON c.id = eftc.entity_id AND eftc.entity_table = 'civicrm_contribution'
++     
++      LEFT JOIN civicrm_grant ccg ON ccg.id = eftc.entity_id AND eftc.entity_table = 'civicrm_grant'
++      LEFT JOIN civicrm_grant_program cgp ON cgp.id = ccg.grant_program_id
+       LEFT JOIN civicrm_option_group cog_status ON cog_status.name = 'contribution_status'
+       LEFT JOIN civicrm_option_value cov_status ON (cov_status.value = ft.status_id AND cov_status.option_group_id = cog_status.id)
+       LEFT JOIN civicrm_entity_financial_trxn efti ON (efti.financial_trxn_id  = ft.id AND efti.entity_table = 'civicrm_financial_item')
+@@ -163,7 +170,7 @@ class CRM_Financial_BAO_ExportFormat_CSV extends CRM_Financial_BAO_ExportFormat
+       $financialItems = array();
+       $this->_batchIds = $batchId;
+       while ($dao->fetch()) {
+-        $creditAccountName = $creditAccountType =
++        $creditAccountName = $creditAccountType = 
+           $creditAccount = NULL;
+         if ($dao->credit_account) {
+           $creditAccountName = $dao->credit_account_name;
+@@ -173,9 +180,9 @@ class CRM_Financial_BAO_ExportFormat_CSV extends CRM_Financial_BAO_ExportFormat
+         else {
+           $creditAccountName = $dao->from_credit_account_name;
+           $creditAccountType = $dao->from_credit_account_type_code;
+-          $creditAccount = $dao->from_credit_account;
++          $creditAccount = $dao->from_credit_account;   
+         }
+-
++        
+         $financialItems[] = array(
+           'Transaction Date' => $dao->trxn_date,
+           'Debit Account' => $dao->to_account_code,
+@@ -213,4 +220,4 @@ class CRM_Financial_BAO_ExportFormat_CSV extends CRM_Financial_BAO_ExportFormat
+ 
+   function exportTRANS() {
+   }
+-}
++}
+\ No newline at end of file

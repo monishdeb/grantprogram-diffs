@@ -1,0 +1,178 @@
+diff --git a/Users/monish/src/civicrm44/CRM/Grant/Selector/Search.php b/CRM/Grant/Selector/Search.php
+index 70aa1c0..f5ca93a 100644
+--- a/Users/monish/src/civicrm44/CRM/Grant/Selector/Search.php
++++ b/CRM/Grant/Selector/Search.php
+@@ -74,7 +74,10 @@ class CRM_Grant_Selector_Search extends CRM_Core_Selector_Base implements CRM_Co
+     'grant_amount_total',
+     'grant_amount_requested',
+     'grant_amount_granted',
+-    'grant_application_received_date',
++    'grant_application_received_date', 
++    'grant_payment_created',
++    'program_name',
++    'program_id',
+     'grant_report_received',
+     'grant_money_transfer_date',
+   );
+@@ -156,7 +159,7 @@ class CRM_Grant_Selector_Search extends CRM_Core_Selector_Base implements CRM_Co
+     // submitted form values
+     $this->_queryParams = &$queryParams;
+ 
+-
++    $this->_grantClause = $grantClause;
+     $this->_single  = $single;
+     $this->_limit   = $limit;
+     $this->_context = $context;
+@@ -187,6 +190,8 @@ class CRM_Grant_Selector_Search extends CRM_Core_Selector_Base implements CRM_Co
+    */
+   static function &links($key = NULL) {
+     $cid = CRM_Utils_Request::retrieve('cid', 'Integer', $this);
++    $next = CRM_Utils_Request::retrieve('next', 'Integer', $this);
++    $prev = CRM_Utils_Request::retrieve('prev', 'Integer', $this);
+     $extraParams = ($key) ? "&key={$key}" : NULL;
+ 
+     if (!(self::$_links)) {
+@@ -200,7 +205,7 @@ class CRM_Grant_Selector_Search extends CRM_Core_Selector_Base implements CRM_Co
+         CRM_Core_Action::UPDATE => array(
+           'name' => ts('Edit'),
+           'url' => 'civicrm/contact/view/grant',
+-          'qs' => 'reset=1&action=update&id=%%id%%&cid=%%cid%%&context=%%cxt%%' . $extraParams,
++          'qs' => 'reset=1&action=update&id=%%id%%&cid=%%cid%%&context=%%cxt%%&next=%%next%%&prev=%%prev%%' . $extraParams.'&ncid=%%ncid%%&searchGrants=%%searchGrants%%',
+           'title' => ts('Edit Grant'),
+         ),
+       );
+@@ -273,6 +278,13 @@ class CRM_Grant_Selector_Search extends CRM_Core_Selector_Base implements CRM_Co
+    * @return int   the total number of rows for this action
+    */
+   function &getRows($action, $offset, $rowCount, $sort, $output = NULL) {
++    foreach ($sort->_vars as $key => $value) {
++      if ($value['name'] == "status_weight" && 1 == $key) {
++        $sort = trim($sort->orderBy());
++        $sort .= ', application_received_date DESC';
++        break;
++      }
++    }
+     $result = $this->_query->searchQuery($offset, $rowCount, $sort,
+       FALSE, FALSE,
+       FALSE, FALSE,
+@@ -292,9 +304,46 @@ class CRM_Grant_Selector_Search extends CRM_Core_Selector_Base implements CRM_Co
+       $permissions[] = CRM_Core_Permission::DELETE;
+     }
+     $mask = CRM_Core_Action::mask($permissions);
+-
+-    while ($result->fetch()) {
++    //added by JMA
++     $grant = $this->_query->searchQuery( 
++       $offset, $rowCount, $sort,
++       false, false, 
++       false, false, 
++       false, 
++       $this->_grantClause );
++     while ($grant->fetch()) {
++       $grants[$grant->id] = $grant->id;
++       $grantContacts[$grant->id] = $grant->contact_id;
++     }
++     while ($result->fetch()) {
+       $row = array();
++      if ($result->id == CRM_Utils_Array::value('id',$_GET)) {
++        continue;
++      }
++      $prev = $next = null;
++      $foundit = false;
++      $contactGrants = $grants;
++      $searchGrants = implode(',', $grants);
++      foreach( $contactGrants as $gKey => $gVal) {
++        if ($foundit) {
++          $next = $gKey; 
++          break;
++        }
++        if ($gKey == $result->id) {
++          $next = $gKey; 
++          if($gKey == end($contactGrants)) {
++            reset($contactGrants);
++            $next = key($contactGrants);
++          }
++          $foundit = true;
++        } else {
++          $prev = $gKey;
++        }
++      }
++      if(empty($prev)) {
++        $prev = end($contactGrants);
++      }
++
+       // the columns we are interested in
+       foreach (self::$_properties as $property) {
+         if (isset($result->$property)) {
+@@ -312,6 +361,10 @@ class CRM_Grant_Selector_Search extends CRM_Core_Selector_Base implements CRM_Co
+           'id' => $result->grant_id,
+           'cid' => $result->contact_id,
+           'cxt' => $this->_context,
++          'prev' => $prev,
++          'next' => $next,
++          'searchGrants' => $searchGrants,
++          'ncid' => $grantContacts[$next],
+         )
+       );
+ 
+@@ -349,14 +402,16 @@ class CRM_Grant_Selector_Search extends CRM_Core_Selector_Base implements CRM_Co
+    */
+   public function &getColumnHeaders($action = NULL, $output = NULL) {
+     if (!isset(self::$_columnHeaders)) {
+-      self::$_columnHeaders = array(
++      $statusHeader = array(
+         array('name' => ts('Status'),
+-          'sort' => 'grant_status',
+-          'direction' => CRM_Utils_Sort::DONTCARE,
++          'sort' => 'status_weight',
++          'direction' => CRM_Utils_Sort::ASCENDING,
+         ),
++      );
++      self::$_columnHeaders = array(
+         array(
+-          'name' => ts('Type'),
+-          'sort' => 'grant_type_id',
++          'name' => ts('Program Name'),
++          'sort' => 'program_id',
+           'direction' => CRM_Utils_Sort::DONTCARE,
+         ),
+         array(
+@@ -372,18 +427,13 @@ class CRM_Grant_Selector_Search extends CRM_Core_Selector_Base implements CRM_Co
+         array(
+           'name' => ts('Application Received'),
+           'sort' => 'grant_application_received_date',
+-          'direction' => CRM_Utils_Sort::DONTCARE,
++          'direction' => CRM_Utils_Sort::DESCENDING,
+         ),
+         array(
+-          'name' => ts('Report Received'),
+-          'sort' => 'grant_report_received',
++          'name' => ts('Payment Created'),
++          'sort' => 'grant_payment_created',
+           'direction' => CRM_Utils_Sort::DONTCARE,
+-        ),
+-        array(
+-          'name' => ts('Money Transferred'),
+-          'sort' => 'money_transfer_date',
+-          'direction' => CRM_Utils_Sort::DONTCARE,
+-        ),
++ 	      ),
+         array('desc' => ts('Actions')),
+       );
+ 
+@@ -393,10 +443,13 @@ class CRM_Grant_Selector_Search extends CRM_Core_Selector_Base implements CRM_Co
+           array(
+             'name' => ts('Name'),
+             'sort' => 'sort_name',
+-            'direction' => CRM_Utils_Sort::ASCENDING,
++            'direction' => CRM_Utils_Sort::DONTCARE,
+           ),
+         );
+-        self::$_columnHeaders = array_merge($pre, self::$_columnHeaders);
++        self::$_columnHeaders = array_merge($pre, $statusHeader, self::$_columnHeaders);
++      }
++      else {
++        self::$_columnHeaders = array_merge($statusHeader, self::$_columnHeaders);
+       }
+     }
+     return self::$_columnHeaders;
