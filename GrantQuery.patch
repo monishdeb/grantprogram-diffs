@@ -1,0 +1,146 @@
+diff --git a/Users/monish/src/civicrm44/CRM/Grant/BAO/Query.php b/CRM/Grant/BAO/Query.php
+index ab5824b..7d25691 100644
+--- a/Users/monish/src/civicrm44/CRM/Grant/BAO/Query.php
++++ b/CRM/Grant/BAO/Query.php
+@@ -62,6 +62,24 @@ class CRM_Grant_BAO_Query {
+         $query->_tables['civicrm_grant'] = $query->_whereTables['civicrm_grant'] = 1;
+       }
+ 
++      if (CRM_Utils_Array::value('grant_program', $query->_returnProperties)) {
++        $query->_select['grant_program'] = 'gp.name as program_name';
++        $query->_element['grant_program'] = 1;
++        $query->_tables['grant_program'] = 1;
++      }
++
++      if (CRM_Utils_Array::value('grant_program_id', $query->_returnProperties)) {
++        $query->_select['grant_program_id'] = 'gp.id as program_id';
++        $query->_element['grant_program_id'] = 1;
++        $query->_tables['grant_program_id'] = 1;
++      }
++
++      if (CRM_Utils_Array::value('status_weight', $query->_returnProperties)) {
++        $query->_select['status_weight'] = 'v.weight as status_weight';
++        $query->_element['status_weight'] = 1;
++        $query->_tables['status_weight'] = 1;
++      }
++
+       if (CRM_Utils_Array::value('grant_type_id', $query->_returnProperties)) {
+         $query->_select['grant_type_id'] = 'grant_type.id as grant_type_id';
+         $query->_element['grant_type'] = 1;
+@@ -81,15 +99,18 @@ class CRM_Grant_BAO_Query {
+         $query->_element['grant_note'] = 1;
+         $query->_tables['grant_note'] = 1;
+       }
++
+       $query->_select['grant_amount_requested'] = 'civicrm_grant.amount_requested as grant_amount_requested';
+       $query->_select['grant_amount_granted'] = 'civicrm_grant.amount_granted as grant_amount_granted';
+       $query->_select['grant_amount_total'] = 'civicrm_grant.amount_total as grant_amount_total';
+       $query->_select['grant_application_received_date'] = 'civicrm_grant.application_received_date as grant_application_received_date ';
+       $query->_select['grant_report_received'] = 'civicrm_grant.grant_report_received as grant_report_received';
+       $query->_select['grant_money_transfer_date'] = 'civicrm_grant.money_transfer_date as grant_money_transfer_date';
++      $query->_select['grant_payment_created'] = 'civicrm_payment.payment_created_date as grant_payment_created';
+       $query->_element['grant_type_id'] = 1;
+       $query->_element['grant_status_id'] = 1;
+       $query->_tables['civicrm_grant'] = 1;
++      $query->_tables['civicrm_payment'] = 1;
+       $query->_whereTables['civicrm_grant'] = 1;
+     }
+   }
+@@ -173,6 +194,11 @@ class CRM_Grant_BAO_Query {
+         $query->_tables['civicrm_grant'] = $query->_whereTables['civicrm_grant'] = 1;
+         return;
+ 
++      case 'grant_id':
++        $query->_where[$grouping][] = "civicrm_grant.id = $value";
++        $query->_tables['civicrm_grant'] = $query->_whereTables['civicrm_grant'] = 1;
++        return;
++
+       case 'grant_type_id':
+ 
+         $value = $strtolower(CRM_Core_DAO::escapeString(trim($value)));
+@@ -185,6 +211,18 @@ class CRM_Grant_BAO_Query {
+         $query->_tables['civicrm_grant'] = $query->_whereTables['civicrm_grant'] = 1;
+ 
+         return;
++      case 'grant_program_id':
++        
++        $value = $strtolower(CRM_Core_DAO::escapeString(trim($value)));
++        
++        $query->_where[$grouping][] = "civicrm_grant.grant_program_id $op '{$value}'";
++        
++        $grantPrograms = CRM_Grant_BAO_GrantProgram::getGrantPrograms();
++        $value = $grantPrograms[$value];
++        $query->_qill[$grouping ][] = ts('Grant Type %2 %1', array(1 => $value, 2 => $op));
++        $query->_tables['civicrm_grant'] = $query->_whereTables['civicrm_grant'] = 1;
++
++        return;
+ 
+       case 'grant_status_id':
+ 
+@@ -221,8 +259,20 @@ class CRM_Grant_BAO_Query {
+       case 'grant_amount_low':
+       case 'grant_amount_high':
+         $query->numberRangeBuilder($values,
+-          'civicrm_grant', 'grant_amount', 'amount_total', 'Total Amount'
++          'civicrm_grant', 'grant_amount', 'amount_granted', 'Amount Granted'
++        ); 
++      case 'grant_amount_total':
++      case 'grant_amount_total_low':
++      case 'grant_amount_total_high':
++        $query->numberRangeBuilder($values,
++          'civicrm_grant', 'grant_amount_total', 'amount_total', 'Amount Requested' 
+         );
++      case 'grant_assessment':
++      case 'grant_assessment_low':
++      case 'grant_assessment_high':
++        $query->numberRangeBuilder($values,
++          'civicrm_grant', 'grant_assessment', 'assessment', 'Assessment' 
++        );        
+     }
+   }
+ 
+@@ -246,12 +296,28 @@ class CRM_Grant_BAO_Query {
+         else {
+           $from .= " $side JOIN civicrm_option_value grant_type ON (civicrm_grant.grant_type_id = grant_type.value AND option_group_grant_type.id = grant_type.option_group_id ) ";
+         }
++        $from .= "$side JOIN civicrm_entity_payment AS temp1 ON (civicrm_grant.id = temp1.entity_id AND temp1.entity_table = 'civicrm_grant')
++$side JOIN (SELECT payment_id AS payment_id, entity_id AS entity_id FROM civicrm_entity_payment ORDER BY payment_id DESC) AS temp2 ON temp1.entity_id = temp2.entity_id
++$side JOIN civicrm_payment civicrm_payment2 ON (temp2.payment_id = civicrm_payment2.id)";
++
+         break;
+ 
+       case 'grant_note':
+         $from .= " $side JOIN civicrm_note ON ( civicrm_note.entity_table = 'civicrm_grant' AND
+                                                         civicrm_grant.id = civicrm_note.entity_id )";
+         break;
++      case 'status_weight':
++        $from .= " $side JOIN civicrm_option_value v ON (civicrm_grant.status_id = v.value AND v.option_group_id=21)";
++        break;
++
++      case 'grant_program':
++        $from .= " $side JOIN civicrm_grant_program gp ON (civicrm_grant.grant_program_id = gp.id)";
++        break;
++
++      case 'civicrm_payment':
++        $from .= " $side JOIN civicrm_entity_payment ep ON (civicrm_grant.id = ep.entity_id AND ep.entity_table = 'civicrm_grant')" .
++          " $side JOIN civicrm_payment civicrm_payment ON (ep.payment_id = civicrm_payment.id)";
++        break;
+     }
+     return $from;
+   }
+@@ -278,11 +344,15 @@ class CRM_Grant_BAO_Query {
+         'grant_id' => 1,
+         'grant_type' => 1,
+         'grant_status' => 1,
++        'status_weight' => 1,
+         'grant_amount_requested' => 1,
+         'grant_application_received_date' => 1,
++        'grant_payment_created' => 1,
+         'grant_report_received' => 1,
+         'grant_money_transfer_date' => 1,
+         'grant_note' => 1,
++        'grant_program' => 1,
++        'grant_program_id' => 1,
+       );
+     }
+ 
